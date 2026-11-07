@@ -26,6 +26,7 @@ Proxy options:
   --max-bytes N             Upload plus download bytes per key [10000000000]
   --trusted-proxy IP        Ingress allowed to set one X-Forwarded-For IP
   --garbage-file FILE       Serve this file for quota blocks and denylisted UAs
+  --garbage-content-type T  Content-Type of the garbage file [text/html]
   --instance NAME           Management socket suffix [default]
   --state-dir DIR           State directory [./blockade-state for default instance]
   --checkpoint-secs N       Seconds between quota checkpoints [5]
@@ -38,6 +39,7 @@ pub struct Config {
     pub listen: SocketAddr,
     pub trusted_proxy: Option<IpAddr>,
     pub garbage: Option<Bytes>,
+    pub garbage_content_type: HeaderValue,
     pub interval_secs: u64,
     pub intervals: u64,
     pub max_requests: u64,
@@ -54,6 +56,7 @@ impl Config {
         let mut listen = SocketAddr::from(([127, 0, 0, 1], 8080));
         let mut trusted_proxy = None;
         let mut garbage_file = None;
+        let mut garbage_content_type = HeaderValue::from_static("text/html");
         let mut interval_secs = 86_400;
         let mut intervals = 30;
         let mut max_requests = 1_000_000;
@@ -84,6 +87,12 @@ impl Config {
                     trusted_proxy = Some(parse::<IpAddr>(flag, arg)?.to_canonical())
                 }
                 "--garbage-file" => garbage_file = Some(PathBuf::from(arg)),
+                "--garbage-content-type" => {
+                    garbage_content_type = parse(flag, arg)?;
+                    if garbage_content_type.as_bytes().trim_ascii().is_empty() {
+                        return Err("--garbage-content-type requires a nonempty value".into());
+                    }
+                }
                 "--interval-secs" => interval_secs = positive(flag, arg, u64::MAX)?,
                 "--window-intervals" => intervals = positive(flag, arg, 60)?,
                 "--max-requests" => max_requests = positive(flag, arg, u64::MAX)?,
@@ -117,6 +126,7 @@ impl Config {
             listen,
             trusted_proxy,
             garbage,
+            garbage_content_type,
             interval_secs,
             intervals,
             max_requests,

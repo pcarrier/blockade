@@ -160,6 +160,7 @@ async fn serve(
         host: config.host,
         trusted_proxy: config.trusted_proxy,
         garbage: config.garbage,
+        garbage_content_type: config.garbage_content_type,
         asns,
         ledger: Arc::clone(&ledger),
         state: Arc::clone(&state),
@@ -248,6 +249,7 @@ struct Proxy {
     host: HeaderValue,
     trusted_proxy: Option<IpAddr>,
     garbage: Option<Bytes>,
+    garbage_content_type: HeaderValue,
     asns: Reader<Vec<u8>>,
     ledger: Arc<Mutex<Ledger>>,
     state: Arc<State>,
@@ -263,10 +265,9 @@ impl Proxy {
         {
             let mut response = reject(StatusCode::OK);
             *response.body_mut() = ProxyBody::Garbage(garbage.clone());
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/octet-stream"),
-            );
+            response
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, self.garbage_content_type.clone());
             return response;
         }
         reject(status)

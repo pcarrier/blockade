@@ -173,6 +173,7 @@ New state directories start with `curl`, `wget`, `httpie`, `python-requests`, `g
 | `--max-bytes N` | Combined upload and download body bytes per key per window | `10000000000` (10 GB) |
 | `--trusted-proxy IP` | Ingress that overwrites `X-Forwarded-For` with one client IP | Unset |
 | `--garbage-file FILE` | Serve a local file with `200 OK` for quota blocks and denylisted UAs | Unset |
+| `--garbage-content-type TYPE` | MIME type of the garbage response | `text/html` |
 | `--instance NAME` | Control socket suffix for multiple proxies under one user | `default` |
 | `--state-dir DIR` | Directory for quota checkpoints and UA rules | `./blockade-state` or `./blockade-<instance>-state` |
 | `--checkpoint-secs N` | Seconds between quota checkpoints | `5` |
@@ -190,7 +191,7 @@ The TCP peer supplies the client IP unless it matches `--trusted-proxy`. A trust
 
 By default, quota blocks return `429` and denylisted UAs return `403`. The first request beyond the request limit is rejected. The body frame that crosses the byte limit is counted and can pass. Later frames for a blocked key stop, which can truncate an in-flight transfer. Byte totals count body data handed to the HTTP writer in both directions, excluding headers and framing. Rejected requests do not extend the window.
 
-With `--garbage-file FILE`, Blockade loads a regular file of up to 16 MiB at startup and serves it with `200 OK` and `application/octet-stream` for quota blocks and denylisted UAs. Requests blocked at admission receive the file directly from Blockade. Restart the proxy to load a changed file.
+With `--garbage-file FILE`, Blockade loads a regular file of up to 16 MiB at startup and serves it with `200 OK` for quota blocks and denylisted UAs. The MIME type defaults to `text/html`. Set it with `--garbage-content-type`, for example `--garbage-content-type 'text/plain; charset=utf-8'`. Requests blocked at admission receive the file directly from Blockade. Restart the proxy to load a changed file.
 
 The origin receives the configured upstream `Host` and a fresh `X-Forwarded-For`. HTTP upgrades and CONNECT return `501`. Chunked bodies stream through the proxy with trailers discarded.
 
