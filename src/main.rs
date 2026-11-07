@@ -7,7 +7,7 @@ use std::{
     env,
     error::Error,
     future::Future,
-    io,
+    io::{self, Write},
     net::IpAddr,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -73,8 +73,8 @@ fn run() -> Result<(), AnyError> {
         .enable_all()
         .build()?;
     match (command, options) {
-        ("help" | "--help" | "-h", []) => println!("{USAGE}"),
-        ("proxy", [flag]) if flag == "--help" => println!("{USAGE}"),
+        ("help" | "--help" | "-h", []) => print_usage()?,
+        ("proxy", [flag]) if flag == "--help" => print_usage()?,
         ("proxy", options) => {
             let control = control::Address::new(&instance)?;
             let config = Config::parse(&instance, options)?;
@@ -126,6 +126,13 @@ fn run() -> Result<(), AnyError> {
     Ok(())
 }
 
+fn print_usage() -> io::Result<()> {
+    match writeln!(io::stdout(), "{USAGE}") {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    }
+}
+
 async fn serve(
     config: Config,
     control: control::Address,
@@ -150,6 +157,7 @@ async fn serve(
         upstream: config.upstream,
         host: config.host,
         trusted_proxy: config.trusted_proxy,
+        garbage: config.garbage,
         asns,
         ledger: Arc::clone(&ledger),
         state: Arc::clone(&state),
@@ -195,11 +203,22 @@ async fn accept_connections(listener: TcpListener, proxy: Arc<Proxy>) {
         tokio::spawn(async move {
             let _permit = permit;
             let _ = socket.set_nodelay(true);
-            let service = service_fn(|request| async {
-                let response = proxy
-                    .forward(request, address.ip())
-                    .await
-                    .unwrap_or_else(reject);
+            let service = service_fn(|request: Request<Incoming>| async {
+                let has_body = !request.body().is_end_stream();
+                let response =
+                    proxy
+                        .forward(request, address.ip())
+                        .await
+                        .unwrap_or_else(|status| {
+                            let mut response = proxy.error_response(status);
+                            // A local rejection can leave the upload unread.
+                            if has_body {
+                                response
+                                    .headers_mut()
+                                    .insert(header::CONNECTION, HeaderValue::from_static("close"));
+                            }
+                            response
+                        });
                 Ok::<_, Infallible>(response)
             });
             let _ = http1::Builder::new()
@@ -216,6 +235,7 @@ struct Proxy {
     upstream: Uri,
     host: HeaderValue,
     trusted_proxy: Option<IpAddr>,
+    garbage: Option<Bytes>,
     asns: Reader<Vec<u8>>,
     ledger: Arc<Mutex<Ledger>>,
     state: Arc<State>,
@@ -223,6 +243,21 @@ struct Proxy {
 }
 
 impl Proxy {
+    fn error_response(&self, status: StatusCode) -> Response<ProxyBody> {
+        if status == StatusCode::FORBIDDEN
+            && let Some(garbage) = &self.garbage
+        {
+            let mut response = reject(StatusCode::OK);
+            *response.body_mut() = ProxyBody::Garbage(garbage.clone());
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            return response;
+        }
+        reject(status)
+    }
+
     async fn forward(
         &self,
         request: Request<Incoming>,
@@ -430,6 +465,7 @@ fn reject(status: StatusCode) -> Response<ProxyBody> {
 
 enum ProxyBody {
     Empty,
+    Garbage(Bytes),
     Stream {
         body: Incoming,
         meter: Meter,
@@ -466,6 +502,11 @@ impl Body for ProxyBody {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, io::Error>>> {
+        if let Self::Garbage(bytes) = &mut *self {
+            return Poll::Ready(
+                (!bytes.is_empty()).then(|| Ok(Frame::data(std::mem::take(bytes)))),
+            );
+        }
         let Self::Stream {
             body,
             meter,
@@ -528,6 +569,7 @@ impl Body for ProxyBody {
     fn is_end_stream(&self) -> bool {
         match self {
             Self::Empty => true,
+            Self::Garbage(bytes) => bytes.is_empty(),
             Self::Stream { body, pending, .. } => pending.is_none() && body.is_end_stream(),
         }
     }
@@ -535,6 +577,7 @@ impl Body for ProxyBody {
     fn size_hint(&self) -> SizeHint {
         match self {
             Self::Empty => SizeHint::with_exact(0),
+            Self::Garbage(bytes) => SizeHint::with_exact(bytes.len() as u64),
             Self::Stream { body, .. } => body.size_hint(),
         }
     }

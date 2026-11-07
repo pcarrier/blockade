@@ -1,12 +1,14 @@
 use std::{
     ffi::{OsStr, OsString},
+    fs::{self, File},
+    io::Read,
     net::{IpAddr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
 
-use hyper::{Uri, header::HeaderValue};
+use hyper::{Uri, body::Bytes, header::HeaderValue};
 
 use crate::AnyError;
 
@@ -23,6 +25,7 @@ Proxy options:
   --max-requests N          Requests per key per window [1000]
   --max-bytes N             Upload plus download bytes per key [67108864]
   --trusted-proxy IP        Ingress allowed to set one X-Forwarded-For IP
+  --garbage-file FILE       Serve this file instead of returning 403 for denylisted UAs
   --instance NAME           Management socket suffix [default]
   --state-dir DIR           State directory [./blockade-state for default instance]
   --checkpoint-secs N       Seconds between quota checkpoints [5]
@@ -34,6 +37,7 @@ pub struct Config {
     pub asn_db: PathBuf,
     pub listen: SocketAddr,
     pub trusted_proxy: Option<IpAddr>,
+    pub garbage: Option<Bytes>,
     pub interval_secs: u64,
     pub intervals: u64,
     pub max_requests: u64,
@@ -49,6 +53,7 @@ impl Config {
         let mut asn_db = None;
         let mut listen = SocketAddr::from(([127, 0, 0, 1], 8080));
         let mut trusted_proxy = None;
+        let mut garbage_file = None;
         let mut interval_secs = 86_400;
         let mut intervals = 30;
         let mut max_requests = 1000;
@@ -78,6 +83,7 @@ impl Config {
                 "--trusted-proxy" => {
                     trusted_proxy = Some(parse::<IpAddr>(flag, arg)?.to_canonical())
                 }
+                "--garbage-file" => garbage_file = Some(PathBuf::from(arg)),
                 "--interval-secs" => interval_secs = positive(flag, arg, u64::MAX)?,
                 "--window-intervals" => intervals = positive(flag, arg, 60)?,
                 "--max-requests" => max_requests = positive(flag, arg, u64::MAX)?,
@@ -102,12 +108,15 @@ impl Config {
             return Err("--upstream must be an http://host[:port] origin".into());
         }
         let host = HeaderValue::from_str(authority.as_str())?;
+        let asn_db = asn_db.ok_or("proxy requires --asn-db")?;
+        let garbage = garbage_file.as_deref().map(read_garbage).transpose()?;
         Ok(Self {
             upstream,
             host,
-            asn_db: asn_db.ok_or("proxy requires --asn-db")?,
+            asn_db,
             listen,
             trusted_proxy,
+            garbage,
             interval_secs,
             intervals,
             max_requests,
@@ -117,6 +126,25 @@ impl Config {
             empty_allowlist,
         })
     }
+}
+
+fn read_garbage(path: &Path) -> Result<Bytes, AnyError> {
+    const MAX_GARBAGE: u64 = 16 * 1024 * 1024;
+    let file_error = |error| format!("garbage file {}: {error}", path.display());
+    let metadata = fs::metadata(path).map_err(file_error)?;
+    if !metadata.is_file() || metadata.len() > MAX_GARBAGE {
+        return Err("--garbage-file requires a regular file of at most 16 MiB".into());
+    }
+    let mut data = Vec::with_capacity(metadata.len() as usize);
+    File::open(path)
+        .map_err(file_error)?
+        .take(MAX_GARBAGE + 1)
+        .read_to_end(&mut data)
+        .map_err(file_error)?;
+    if data.len() as u64 > MAX_GARBAGE {
+        return Err("--garbage-file requires a regular file of at most 16 MiB".into());
+    }
+    Ok(Bytes::from(data))
 }
 
 fn parse<T: FromStr>(flag: &str, value: &OsStr) -> Result<T, AnyError> {
