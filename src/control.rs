@@ -79,10 +79,7 @@ pub async fn call(address: Address, request: &str) -> Result<(), AnyError> {
         stream.write_all(request.as_bytes()).await?;
         stream.shutdown().await?;
         let mut response = Vec::new();
-        stream
-            .take(4 * 1024 * 1024)
-            .read_to_end(&mut response)
-            .await?;
+        stream.read_to_end(&mut response).await?;
         Ok::<_, AnyError>(response)
     })
     .await??;

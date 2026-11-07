@@ -10,7 +10,7 @@
         let pkgs = nixpkgs.legacyPackages.${system}; in {
           default = pkgs.pkgsStatic.rustPlatform.buildRustPackage {
             pname = "blockade";
-            version = "0.1.2";
+            version = "0.1.3";
             src = pkgs.lib.fileset.toSource {
               root = ./.;
               fileset = pkgs.lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./src ];

@@ -11,8 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_KEYS: usize = 16_384;
-
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Network {
     Asn(u32),
@@ -96,7 +94,6 @@ pub enum Denial {
     Quota,
     Pending,
     Manual,
-    Capacity,
 }
 
 impl Ledger {
@@ -126,10 +123,8 @@ impl Ledger {
             self.last_sweep = tick;
         }
 
-        let full = self.keys.len() >= MAX_KEYS;
         let mut entry = match self.keys.entry(Arc::new(key)) {
             Entry::Occupied(entry) => entry,
-            Entry::Vacant(_) if full => return Err(Denial::Capacity),
             Entry::Vacant(entry) => entry.insert_entry(Window::default()),
         };
         let window = entry.get_mut();

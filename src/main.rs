@@ -10,7 +10,10 @@ use std::{
     io::{self, Write},
     net::IpAddr,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -28,9 +31,9 @@ use hyper_util::{
 };
 use maxminddb::{Reader, path};
 use tokio::{
+    io::AsyncWriteExt,
     net::TcpListener,
     signal::unix::{SignalKind, signal},
-    sync::Semaphore,
     time::{self, Sleep, timeout},
 };
 
@@ -38,7 +41,6 @@ use config::{Config, USAGE};
 use quota::{Denial, Key, Ledger, Meter, Network, Policy, State, Transfer};
 
 const MAX_BUFFER: usize = 32 * 1024;
-const MAX_CONNECTIONS: usize = 1024;
 const BODY_IDLE: Duration = Duration::from_secs(30);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -188,9 +190,7 @@ async fn serve(
 }
 
 async fn accept_connections(listener: TcpListener, proxy: Arc<Proxy>) {
-    let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
-        let permit = Arc::clone(&connections).acquire_owned().await.unwrap();
         let (socket, address) = match listener.accept().await {
             Ok(connection) => connection,
             Err(err) => {
@@ -201,8 +201,8 @@ async fn accept_connections(listener: TcpListener, proxy: Arc<Proxy>) {
         };
         let proxy = Arc::clone(&proxy);
         tokio::spawn(async move {
-            let _permit = permit;
             let _ = socket.set_nodelay(true);
+            let drain_upload = AtomicBool::new(false);
             let service = service_fn(|request: Request<Incoming>| async {
                 let has_body = !request.body().is_end_stream();
                 let response =
@@ -213,6 +213,9 @@ async fn accept_connections(listener: TcpListener, proxy: Arc<Proxy>) {
                             let mut response = proxy.error_response(status);
                             // A local rejection can leave the upload unread.
                             if has_body {
+                                if matches!(response.body(), ProxyBody::Garbage(_)) {
+                                    drain_upload.store(true, Ordering::Relaxed);
+                                }
                                 response
                                     .headers_mut()
                                     .insert(header::CONNECTION, HeaderValue::from_static("close"));
@@ -221,12 +224,21 @@ async fn accept_connections(listener: TcpListener, proxy: Arc<Proxy>) {
                         });
                 Ok::<_, Infallible>(response)
             });
-            let _ = http1::Builder::new()
+            let connection = http1::Builder::new()
                 .timer(TokioTimer::new())
                 .header_read_timeout(Duration::from_secs(10))
                 .max_buf_size(MAX_BUFFER)
-                .serve_connection(TokioIo::new(socket), service)
-                .await;
+                .serve_connection(TokioIo::new(socket), service);
+            if let Ok(parts) = connection.without_shutdown().await {
+                let mut socket = parts.io.into_inner();
+                if socket.shutdown().await.is_ok() && drain_upload.load(Ordering::Relaxed) {
+                    // A full close with unread upload data can reset the response.
+                    let _ = timeout(Duration::from_secs(1), async {
+                        tokio::io::copy(&mut socket, &mut tokio::io::sink()).await
+                    })
+                    .await;
+                }
+            }
         });
     }
 }
@@ -244,8 +256,10 @@ struct Proxy {
 
 impl Proxy {
     fn error_response(&self, status: StatusCode) -> Response<ProxyBody> {
-        if status == StatusCode::FORBIDDEN
-            && let Some(garbage) = &self.garbage
+        if matches!(
+            status,
+            StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+        ) && let Some(garbage) = &self.garbage
         {
             let mut response = reject(StatusCode::OK);
             *response.body_mut() = ProxyBody::Garbage(garbage.clone());
@@ -361,7 +375,6 @@ impl Proxy {
         match denial {
             Denial::Quota => StatusCode::TOO_MANY_REQUESTS,
             Denial::Manual => StatusCode::FORBIDDEN,
-            Denial::Capacity => StatusCode::SERVICE_UNAVAILABLE,
             Denial::Pending => match self.state.update_blocks(&self.ledger, None).await {
                 Ok(Ok(_)) => StatusCode::TOO_MANY_REQUESTS,
                 error => {

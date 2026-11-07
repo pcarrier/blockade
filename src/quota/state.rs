@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{Block, Bucket, Key, Ledger, MAX_KEYS, Rule, Window};
+use super::{Block, Bucket, Key, Ledger, Rule, Window};
 
 const RULES: &str = "rules.tsv";
 const QUOTAS: &str = "quotas.tsv";
@@ -55,7 +55,7 @@ impl State {
             quota_writer: Mutex::new(()),
         };
 
-        if let Some(file) = open_existing(&state.path.join(RULES), 2 * 1024 * 1024)? {
+        if let Some(file) = open_existing(&state.path.join(RULES))? {
             for line in file.lines() {
                 let line = line?;
                 let (kind, ua) = line.split_once('\t').ok_or_else(bad_state)?;
@@ -64,10 +64,7 @@ impl State {
                     "denylist" => Rule::Deny,
                     _ => return Err(bad_state()),
                 };
-                if !valid_ua(ua)
-                    || ledger.rules.len() == MAX_KEYS
-                    || ledger.rules.insert(ua.into(), rule).is_some()
-                {
+                if !valid_ua(ua) || ledger.rules.insert(ua.into(), rule).is_some() {
                     return Err(bad_state());
                 }
             }
@@ -81,8 +78,8 @@ impl State {
             }
             state.write_rules(&ledger.rules)?;
         }
-        let blocks = open_existing(&state.path.join(BLOCKS), 2 * 1024 * 1024)?;
-        if let Some(file) = open_existing(&state.path.join(QUOTAS), 128 * 1024 * 1024)? {
+        let blocks = open_existing(&state.path.join(BLOCKS))?;
+        if let Some(file) = open_existing(&state.path.join(QUOTAS))? {
             restore_quotas(file, ledger, blocks.is_none())?;
         }
         if let Some(file) = blocks {
@@ -98,9 +95,6 @@ impl State {
                     return Err(bad_state());
                 }
                 let key = Key(network.parse().map_err(|_| bad_state())?, ua.into());
-                if ledger.keys.len() == MAX_KEYS && !ledger.keys.contains_key(&key) {
-                    return Err(bad_state());
-                }
                 let window = ledger.keys.entry(key.into()).or_default();
                 if window
                     .block
@@ -129,12 +123,7 @@ impl State {
     ) -> io::Result<()> {
         let mut rules = ledger.lock().unwrap().rules.clone();
         let previous = match rule {
-            Some(rule) => {
-                if rules.len() == MAX_KEYS && !rules.contains_key(&ua) {
-                    return Err(io::Error::other("UA rule table is full"));
-                }
-                rules.insert(ua, rule)
-            }
+            Some(rule) => rules.insert(ua, rule),
             None => rules.remove(&ua),
         };
         if previous != rule {
@@ -323,14 +312,13 @@ fn mark_committed(ledger: &mut Ledger, blocks: &[(Key, &'static str)]) {
     }
 }
 
-fn open_existing(path: &Path, limit: u64) -> io::Result<Option<BufReader<File>>> {
+fn open_existing(path: &Path) -> io::Result<Option<BufReader<File>>> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > limit {
+    if !file.metadata()?.is_file() {
         return Err(bad_state());
     }
     Ok(Some(BufReader::new(file)))
@@ -420,9 +408,7 @@ fn restore_window(
                 durable: false,
             });
         }
-        if !window.buckets.is_empty()
-            && (ledger.keys.len() == MAX_KEYS || ledger.keys.insert(key.into(), window).is_some())
-        {
+        if !window.buckets.is_empty() && ledger.keys.insert(key.into(), window).is_some() {
             return Err(bad_state());
         }
     }

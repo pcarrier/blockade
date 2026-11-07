@@ -25,7 +25,7 @@ Proxy options:
   --max-requests N          Requests per key per window [1000000]
   --max-bytes N             Upload plus download bytes per key [10000000000]
   --trusted-proxy IP        Ingress allowed to set one X-Forwarded-For IP
-  --garbage-file FILE       Serve this file instead of returning 403 for denylisted UAs
+  --garbage-file FILE       Serve this file for quota blocks and denylisted UAs
   --instance NAME           Management socket suffix [default]
   --state-dir DIR           State directory [./blockade-state for default instance]
   --checkpoint-secs N       Seconds between quota checkpoints [5]
