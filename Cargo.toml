@@ -1,0 +1,21 @@
+[package]
+name = "blockade"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+hyper = { version = "1", features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+libc = "0.2"
+maxminddb = { version = "0.32", default-features = false }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "signal", "sync", "time"] }
+# Blockade uses stderr for diagnostics and has no tracing subscriber.
+tracing = { version = "0.1", default-features = false, features = ["release_max_level_off"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
