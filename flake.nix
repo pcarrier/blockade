@@ -19,6 +19,7 @@
             auditable = false;
             stripAllList = [ "bin" ];
             allowedReferences = [ ];
+            meta.license = pkgs.lib.licenses.mit;
           };
         });
 
