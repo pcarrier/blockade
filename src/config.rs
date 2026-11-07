@@ -22,8 +22,8 @@ Proxy options:
   --listen ADDR             Listen IP and port [127.0.0.1:8080]
   --interval-secs N          Seconds per interval [86400]
   --window-intervals N      Intervals per window, including current [30]
-  --max-requests N          Requests per key per window [1000]
-  --max-bytes N             Upload plus download bytes per key [67108864]
+  --max-requests N          Requests per key per window [1000000]
+  --max-bytes N             Upload plus download bytes per key [10000000000]
   --trusted-proxy IP        Ingress allowed to set one X-Forwarded-For IP
   --garbage-file FILE       Serve this file instead of returning 403 for denylisted UAs
   --instance NAME           Management socket suffix [default]
@@ -56,8 +56,8 @@ impl Config {
         let mut garbage_file = None;
         let mut interval_secs = 86_400;
         let mut intervals = 30;
-        let mut max_requests = 1000;
-        let mut max_bytes = 64 * 1024 * 1024;
+        let mut max_requests = 1_000_000;
+        let mut max_bytes = 10_000_000_000;
         let mut state_dir = if instance == "default" {
             PathBuf::from("blockade-state")
         } else {

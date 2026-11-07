@@ -2,7 +2,7 @@
 
 Blockade is a streaming HTTP/1 reverse proxy for one plain HTTP origin. It uses a local ASN database and keeps rolling request and byte quotas by ASN and reduced User-Agent. Run it behind a TLS terminator for HTTPS ingress.
 
-Static binaries for x86-64 and ARM64 Linux are available from [GitHub Releases](https://github.com/pcarrier/blockade/releases). Download the binary for your architecture and make it executable with `chmod +x`. Each release includes `SHA256SUMS` for verification. GitHub Actions also keeps the binaries as workflow artifacts and publishes them when a `v*` tag is pushed.
+Static binaries for x86-64 and ARM64 Linux are available from [GitHub Releases](https://github.com/pcarrier/blockade/releases). Verify the binary for your architecture against `SHA256SUMS` and install it as an executable named `blockade` on your `PATH`. GitHub Actions also keeps the binaries as workflow artifacts and publishes them when a `v*` tag is pushed.
 
 ```sh
 direnv allow
@@ -36,8 +36,8 @@ New state directories start with `curl`, `wget`, `httpie`, `python-requests`, `g
 | `--listen ADDR` | Listen IP and port | `127.0.0.1:8080` |
 | `--interval-secs N` | Seconds in one bucket | `86400` |
 | `--window-intervals N` | Buckets in the rolling window, including the current one. Range 1–60. | `30` |
-| `--max-requests N` | Admitted requests per key per window | `1000` |
-| `--max-bytes N` | Combined upload and download body bytes per key per window | `67108864` |
+| `--max-requests N` | Admitted requests per key per window | `1000000` |
+| `--max-bytes N` | Combined upload and download body bytes per key per window | `10000000000` (10 GB) |
 | `--trusted-proxy IP` | Ingress that overwrites `X-Forwarded-For` with one client IP | Unset |
 | `--garbage-file FILE` | Serve a local file with `200 OK` to denylisted UAs | Unset |
 | `--instance NAME` | Control socket suffix for multiple proxies under one user | `default` |
