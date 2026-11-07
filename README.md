@@ -2,6 +2,8 @@
 
 Blockade is a streaming HTTP/1 reverse proxy for one plain HTTP origin. It uses a local ASN database and keeps rolling request and byte quotas by ASN and reduced User-Agent. Run it behind a TLS terminator for HTTPS ingress.
 
+Static binaries for x86-64 and ARM64 Linux are available from [GitHub Releases](https://github.com/pcarrier/blockade/releases). Download the binary for your architecture and make it executable with `chmod +x`. Each release includes `SHA256SUMS` for verification. GitHub Actions also keeps the binaries as workflow artifacts and publishes them when a `v*` tag is pushed.
+
 ```sh
 direnv allow
 nix build
